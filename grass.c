@@ -63,7 +63,6 @@ void add_quads(renderer_t * renderer, const blade_t * blade) {
 }
 
 void create_geometry(app_t * app) {
-    renderer_clear_vertices(app->renderer);
     foreach(vec_blade_t, &app->blades, it) {
         blade_t *blade = it.ref;
         add_quads(app->renderer, blade);
@@ -76,7 +75,7 @@ blade_t create_blade(vec3s origin) {
         .origin =  origin,
         .colour = (vec3s){1.0f, 0.6f + rand_float(0.8f), 1.0f}, 
         .orientation = rand_float(GLM_PI),
-        .initial_velocity = glms_vec3_add((vec3s){0.0f, 0.02f, 0.0f}, rand_vec(0.004f))
+        .initial_velocity = glms_vec3_add((vec3s){0.0f, 0.02f, 0.0f}, rand_vec(0.02f))
     };
 }
 

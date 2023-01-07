@@ -37,7 +37,8 @@ typedef struct {
 
 typedef enum object_type_e {
     GROUND,
-    BLADE,
+    GRASS,
+    GRASS_H_SLICE,
     SHADOW,
     MAX_OBJECT_TYPE
 } object_type_e;
@@ -51,10 +52,14 @@ typedef struct {
     sg_bindings bind[MAX_OBJECT_TYPE];
     sg_pipeline pip;
     sg_pass_action pass_action;
+    sg_pass offscreen_pass;
+    sg_pass_action offscreen_pass_action;
     mat4s view_proj;
     float rx;
     float ry;
 } renderer_t;
+
+static void add_h_quad(renderer_t * renderer);
 
 // recursively subdivide the image, assumes the source is power of two square
 sg_image_desc mip_chain(size_t dim, uint8_t *data, vec_uint8_t *output) {
@@ -127,6 +132,7 @@ renderer_t * renderer_init(int width, int height) {
     char texture_file[MAX_OBJECT_TYPE][32] = {
         "mud.png",
         "leaf.png",
+        "",
         "contact_shadow.png"
     };
 
@@ -134,11 +140,13 @@ renderer_t * renderer_init(int width, int height) {
         renderer->vertices[i] = vec_vertex_t_init();
         renderer->pixels[i] = vec_uint8_t_init();
 
-        int x,y,n;
-        uint8_t *data = stbi_load(texture_file[i], &x, &y, &n, 4);
-        sg_image_desc img_desc = mip_chain(x, data, &renderer->pixels[i]);
-        renderer->img[i] = sg_make_image(&img_desc);
-        stbi_image_free(data);
+        if (strlen(texture_file[i])) {
+            int x,y,n;
+            uint8_t *data = stbi_load(texture_file[i], &x, &y, &n, 4);
+            sg_image_desc img_desc = mip_chain(x, data, &renderer->pixels[i]);
+            renderer->img[i] = sg_make_image(&img_desc);
+            stbi_image_free(data);
+        }
     } 
 
     /* create shader */
@@ -221,10 +229,35 @@ renderer_t * renderer_init(int width, int height) {
     /* default pass action */
     renderer->pass_action = (sg_pass_action){ 0 };
 
+    /* offscreen pass */
+    sg_image_desc img_desc = {
+        .render_target = true,
+        .width = 64,
+        .height = 64,
+        .min_filter = SG_FILTER_LINEAR,
+        .mag_filter = SG_FILTER_LINEAR,
+    };
+    renderer->img[GRASS_H_SLICE] = sg_make_image(&img_desc);
+    img_desc.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+    sg_image depth_img = sg_make_image(&img_desc);
+
+    /* an offscreen render pass into those images */
+    renderer->offscreen_pass = sg_make_pass(&(sg_pass_desc){
+        .color_attachments[0].image = renderer->img[GRASS_H_SLICE],
+        .depth_stencil_attachment.image = depth_img
+    });
+
+    /* pass action for offscreen pass, clearing to black */
+    renderer->offscreen_pass_action = (sg_pass_action){
+        .colors[0] = { .action = SG_ACTION_CLEAR, .value = { 0.0f, 0.0f, 0.0f, 0.0f } }
+    };
+
     /* view-projection matrix */
     mat4s proj = glms_perspective(glm_rad(60.0f), (float)width/(float)height, 0.1f, 20.0f);
     mat4s view = glms_lookat((vec3s){0.0f, 0.25f, 0.5f}, (vec3s){0.0f, 0.0f, 0.0f}, (vec3s){0.0f, 1.0f, 0.0f});
     renderer->view_proj = glms_mat4_mul(proj, view);
+
+    add_h_quad(renderer);
 
     return renderer;
 }
@@ -260,7 +293,17 @@ static void add_quad(vec_vertex_t * vertices, mat4s m0, vec2s scale, vec3s colou
 
 void renderer_add_blade_quad(renderer_t * renderer, mat4s m0, vec2s scale,
         vec3s colour, vec2s tex_off, vec2s tex_scale) {
-    add_quad(&renderer->vertices[BLADE], m0, scale, colour, tex_off, tex_scale);
+    add_quad(&renderer->vertices[GRASS], m0, scale, colour, tex_off, tex_scale);
+}
+
+static void add_h_quad(renderer_t * renderer) {
+    mat4s m0 = glms_mat4_mul(glms_quat_mat4(glms_quatv(-GLM_PI_2, (vec3s){1.0f, 0.0f, 0.0f})),
+        glms_translate(glms_mat4_identity(), (vec3s){0.0f, -0.5f, 0.0f}));
+    vec2s scale = glms_vec2_one();
+    vec3s colour = glms_vec3_one();
+    vec2s tex_off = glms_vec2_zero();
+    vec2s tex_scale = glms_vec2_one(); 
+    add_quad(&renderer->vertices[GRASS_H_SLICE], m0, scale, colour, tex_off, tex_scale);
 }
 
 static void add_cylinder(vec_vertex_t * vertices, mat4s m0, float r0, mat4s m1, float r1) {
@@ -411,31 +454,34 @@ static void render_mesh(renderer_t * renderer, mat4s world, object_type_e obj_ty
     sg_draw(0, size, 1);
 } 
 
-static bool is_clipped_point(vec4s projected) {
-    vec3s pos = (vec3s) {
+static vec3s project(mat4s mvp, vec3s pos) {
+    vec4s projected = glms_mat4_mulv(mvp, glms_vec4(pos, 1.0f));
+    return (vec3s) {
         projected.x / projected.w,
         projected.y / projected.w,
         projected.z / projected.w,
     };
-    return pos.z < 0.0f ||
-        pos.z > 1.0f ||
-        pos.x < -1.0f ||
-        pos.x > 1.0f ||
-        pos.y < -1.0f ||
-        pos.y > 1.0f;
+}
+
+static bool is_clipped_point(vec3s projected) {
+        return projected.z < 0.0f ||
+        projected.z > 1.0f ||
+        projected.x < -1.0f ||
+        projected.x > 1.0f ||
+        projected.y < -1.0f ||
+        projected.y > 1.0f;
 }
 
 static bool is_clipped_horiz_rect(mat4s mvp, vec2s min, vec2s max) {
-    vec4s p[] = {
-        (vec4s){min.x, 0.0f, min.y, 1.0f},
-        (vec4s){min.x, 0.0f, max.y, 1.0f},
-        (vec4s){max.x, 0.0f, min.y, 1.0f},
-        (vec4s){max.x, 0.0f, max.y, 1.0f},
+    vec3s p[] = {
+        (vec3s){min.x, 0.0f, min.y},
+        (vec3s){min.x, 0.0f, max.y},
+        (vec3s){max.x, 0.0f, min.y},
+        (vec3s){max.x, 0.0f, max.y},
     };
 
     for(int i = 0; i < 4; i++) {
-        if (!is_clipped_point(
-                glms_mat4_mulv(mvp, p[i]))) {
+        if (!is_clipped_point(project(mvp, p[i]))) {
             return false;
         }
     }
@@ -443,7 +489,30 @@ static bool is_clipped_horiz_rect(mat4s mvp, vec2s min, vec2s max) {
     return true;
 }
 
+static void render_offscreen(renderer_t * renderer) {
+    sg_begin_pass(renderer->offscreen_pass, &renderer->offscreen_pass_action);
+    sg_apply_pipeline(renderer->pip);
+
+    params_t vs_params;
+    // orthographic projection looking down
+    vs_params.mvp = glms_mat4_mul(glms_ortho_default_s(1.0f, 0.5f), 
+        glms_lookat((vec3s){0.0f, 1.0f, 0.0f}, glms_vec3_zero(), (vec3s){0.0f, 0.0f, 1.0f}));
+    sg_apply_uniforms(SG_SHADERSTAGE_VS, 0, &SG_RANGE(vs_params));
+
+    // draw one grass patch
+    size_t size = vec_vertex_t_size(&renderer->vertices[GRASS]);
+    sg_apply_bindings(&renderer->bind[GRASS]);
+    sg_draw(0, size, 1);
+   
+    sg_end_pass();
+}
+
 void renderer_render(renderer_t * renderer, int cur_width, int cur_height) {
+
+    if (renderer->frame == 0) {
+        render_offscreen(renderer);
+    }
+
     mat4s rxm = glms_quat_mat4(glms_quatv(glm_rad(renderer->rx), (vec3s){1.0f, 0.0f, 0.0f}));
     mat4s rym = glms_quat_mat4(glms_quatv(glm_rad(renderer->ry), (vec3s){0.0f, 1.0f, 0.0f}));
     mat4s world = glms_mat4_mul(rxm, rym);
@@ -452,14 +521,19 @@ void renderer_render(renderer_t * renderer, int cur_width, int cur_height) {
     sg_apply_pipeline(renderer->pip);
 
     // grass X x Z instances
-    for (int x = -3; x < 3; x++) {
-        for (int z = -3; z < 3; z++) {
+    for (int x = -10; x < 10; x++) {
+        for (int z = -10; z < 10; z++) {
             mat4s patch = glms_translate(glms_mat4_identity(),
                 (vec3s){x, 0.0f, z});
             mat4s model = glms_mat4_mul(world, patch);
             mat4s mvp = glms_mat4_mul(renderer->view_proj, model);
-            if (!is_clipped_horiz_rect(mvp, (vec2s){-0.5f, -0.5f}, (vec2s){0.5f, 0.5f})) { 
-                render_mesh(renderer, model, BLADE);
+            if (!is_clipped_horiz_rect(mvp, (vec2s){-0.5f, -0.5f}, (vec2s){0.5f, 0.5f})) {
+                vec3s projected_origin = project(mvp, glms_vec3_zero());
+                if (projected_origin.z < 0.8f) {
+                    render_mesh(renderer, model, GRASS);
+                } else {
+                    render_mesh(renderer, model, GRASS_H_SLICE);
+                }
             }
         }
     }
