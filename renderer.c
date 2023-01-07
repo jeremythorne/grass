@@ -402,26 +402,71 @@ void renderer_update(renderer_t * renderer) {
     renderer->ry += 0.2f;
 }
 
-void renderer_render(renderer_t * renderer, int cur_width, int cur_height) {
+static void render_mesh(renderer_t * renderer, mat4s world, object_type_e obj_type) {
     params_t vs_params;
+    vs_params.mvp = glms_mat4_mul(renderer->view_proj, world);
+    sg_apply_uniforms(SG_SHADERSTAGE_VS, 0, &SG_RANGE(vs_params));
+    size_t size = vec_vertex_t_size(&renderer->vertices[obj_type]);
+    sg_apply_bindings(&renderer->bind[obj_type]);
+    sg_draw(0, size, 1);
+} 
+
+static bool is_clipped_point(vec4s projected) {
+    vec3s pos = (vec3s) {
+        projected.x / projected.w,
+        projected.y / projected.w,
+        projected.z / projected.w,
+    };
+    return pos.z < 0.0f ||
+        pos.z > 1.0f ||
+        pos.x < -1.0f ||
+        pos.x > 1.0f ||
+        pos.y < -1.0f ||
+        pos.y > 1.0f;
+}
+
+static bool is_clipped_horiz_rect(mat4s mvp, vec2s min, vec2s max) {
+    vec4s p[] = {
+        (vec4s){min.x, 0.0f, min.y, 1.0f},
+        (vec4s){min.x, 0.0f, max.y, 1.0f},
+        (vec4s){max.x, 0.0f, min.y, 1.0f},
+        (vec4s){max.x, 0.0f, max.y, 1.0f},
+    };
+
+    for(int i = 0; i < 4; i++) {
+        if (!is_clipped_point(
+                glms_mat4_mulv(mvp, p[i]))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void renderer_render(renderer_t * renderer, int cur_width, int cur_height) {
     mat4s rxm = glms_quat_mat4(glms_quatv(glm_rad(renderer->rx), (vec3s){1.0f, 0.0f, 0.0f}));
     mat4s rym = glms_quat_mat4(glms_quatv(glm_rad(renderer->ry), (vec3s){0.0f, 1.0f, 0.0f}));
-    mat4s model = glms_mat4_mul(rxm, rym);
-
-    /* model-view-projection matrix for vertex shader */
-    vs_params.mvp = glms_mat4_mul(renderer->view_proj, model);
+    mat4s world = glms_mat4_mul(rxm, rym);
 
     sg_begin_default_pass(&renderer->pass_action, cur_width, cur_height);
     sg_apply_pipeline(renderer->pip);
-    sg_apply_uniforms(SG_SHADERSTAGE_VS, 0, &SG_RANGE(vs_params));
-    for (int i = 0; i < MAX_OBJECT_TYPE; i++) {
-        size_t size = vec_vertex_t_size(&renderer->vertices[i]);
-        if (!size) {
-            continue;
+
+    // grass X x Z instances
+    for (int x = -3; x < 3; x++) {
+        for (int z = -3; z < 3; z++) {
+            mat4s patch = glms_translate(glms_mat4_identity(),
+                (vec3s){x, 0.0f, z});
+            mat4s model = glms_mat4_mul(world, patch);
+            mat4s mvp = glms_mat4_mul(renderer->view_proj, model);
+            if (!is_clipped_horiz_rect(mvp, (vec2s){-0.5f, -0.5f}, (vec2s){0.5f, 0.5f})) { 
+                render_mesh(renderer, model, BLADE);
+            }
         }
-        sg_apply_bindings(&renderer->bind[i]);
-        sg_draw(0, size, 1);
     }
+
+    // ground plane
+    render_mesh(renderer, world, GROUND);
+    
     sg_end_pass();
     sg_commit();
     renderer->frame++;
