@@ -27,6 +27,7 @@ typedef struct blade_s {
     vec3s colour;
     float orientation;
     vec3s initial_velocity;
+    float density;
 } blade_t;
 
 #define POD
@@ -56,7 +57,8 @@ void add_quads(renderer_t * renderer, const blade_t * blade) {
         float length = glms_vec3_norm(velocity);
         vec2s tex_off = (vec2s){0.0f, i/Nf};
         vec2s tex_scale = (vec2s){1.0f, 1.0f/Nf};
-        renderer_add_blade_quad(renderer, m0, (vec2s){0.005f, length}, blade->colour, tex_off, tex_scale);
+        renderer_add_blade_quad(renderer, m0, (vec2s){0.005f, length}, blade->colour,
+            tex_off, tex_scale, blade->density);
         origin = glms_vec3_add(origin, velocity);
         velocity = glms_vec3_add(velocity, (vec3s){0.0f, -0.008f, 0.0f});
     }
@@ -75,7 +77,8 @@ blade_t create_blade(vec3s origin) {
         .origin =  origin,
         .colour = (vec3s){1.0f, 0.6f + rand_float(0.8f), 1.0f}, 
         .orientation = rand_float(GLM_PI),
-        .initial_velocity = glms_vec3_add((vec3s){0.0f, 0.02f, 0.0f}, rand_vec(0.02f))
+        .initial_velocity = glms_vec3_add((vec3s){0.0f, 0.02f, 0.0f}, rand_vec(0.02f)),
+        .density = 0.5f + rand_float(1.0f)
     };
 }
 
