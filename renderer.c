@@ -181,6 +181,7 @@ static sg_pipeline create_grass_pipeline(int floats_per_vertex) {
                 "  vec3 ambient_colour = vec3(1.9, 1.9, 1.9);\n"
                 "  float lambert = dot(light_dir, vnormal);\n"
                 "  vec4 colour = vcolour * texture(tex, uv);\n"
+                "  if (colour.a < 0.5) { discard; };\n"
                 "  frag_color = colour * vec4(lambert * light_colour + ambient_colour, 1.0);\n"
                 "}\n"
         }
