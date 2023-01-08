@@ -75,7 +75,7 @@ void create_geometry(app_t * app) {
 blade_t create_blade(vec3s origin) {
     return (blade_t){
         .origin =  origin,
-        .colour = (vec3s){1.0f, 0.6f + rand_float(0.8f), 1.0f}, 
+        .colour = (vec3s){0.2f + rand_float(0.2f), 1.0f, 1.0f}, 
         .orientation = rand_float(GLM_PI),
         .initial_velocity = glms_vec3_add((vec3s){0.0f, 0.02f, 0.0f}, rand_vec(0.02f)),
         .density = 0.5f + rand_float(1.0f)
