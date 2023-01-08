@@ -70,39 +70,43 @@ typedef struct {
 static void add_h_quad(renderer_t * renderer);
 
 // recursively subdivide the image, assumes the source is power of two square
-sg_image_desc mip_chain(size_t dim, uint8_t *data, vec_uint8_t *output) {
-    size_t width = dim;
+sg_image_desc mip_chain(size_t dim_w, size_t dim_h, uint8_t *data, vec_uint8_t *output) {
+    size_t width = dim_w;
+    size_t height = dim_h;
     // a mip map chain always fits in twice the original size
-    vec_uint8_t_resize(output, dim * dim * 4 * 2, 0);
+    vec_uint8_t_resize(output, dim_w * dim_h * 4 * 2, 0);
     uint8_t *p = vec_uint8_t_data(output);
-    memcpy(p, data, dim * dim * 4);
+    memcpy(p, data, dim_w * dim_h * 4);
     int num_mipmaps = 0;
     sg_image_data img_data;
     do {
-        size_t size = dim * dim * 4;
+        size_t size = dim_w * dim_h * 4;
         img_data.subimage[0][num_mipmaps].ptr = p;
         img_data.subimage[0][num_mipmaps].size = size;
+
         num_mipmaps += 1;
         uint8_t * src = p;
         p += size;
-        dim = dim >> 1;
-        for (size_t y = 0; y < dim; y++) {
-            for (size_t x = 0; x < dim; x++) {
+        dim_w = dim_w >> 1;
+        dim_h = dim_h >> 1;
+        for (size_t y = 0; y < dim_h; y++) {
+            for (size_t x = 0; x < dim_w; x++) {
                 for (size_t k = 0; k < 4; k++) {
-                    size_t s00 = k + (x * 2 + y * 4 * dim) * 4; 
-                    p[k + (x + y * dim) * 4] =
+                    size_t s00 = k + (x * 2 + y * 4 * dim_w) * 4; 
+                    p[k + (x + y * dim_w) * 4] =
                         (src[s00] +
                         src[s00 + 4] +
-                        src[s00 + 2 * dim * 4] +
-                        src[s00 + 2 * dim * 4 + 4]) / 4;
+                        src[s00 + 2 * dim_w * 4] +
+                        src[s00 + 2 * dim_w * 4 + 4]) / 4;
                 }
             }
         }
-    } while(dim > 0);
+    } while(dim_w > 0 && dim_h > 0);
 
+    printf("%d x %d X %d\n", width, height, num_mipmaps);
     sg_image_desc img_desc = {
         .width = width,
-        .height = width,
+        .height = height,
         .num_mipmaps = num_mipmaps,
         .pixel_format = SG_PIXELFORMAT_RGBA8,
         .mag_filter = SG_FILTER_LINEAR,
@@ -247,7 +251,7 @@ renderer_t * renderer_init(int width, int height) {
         if (strlen(texture_file[i])) {
             int x,y,n;
             uint8_t *data = stbi_load(texture_file[i], &x, &y, &n, 4);
-            sg_image_desc img_desc = mip_chain(x, data, &renderer->pixels[i]);
+            sg_image_desc img_desc = mip_chain(x, y, data, &renderer->pixels[i]);
             renderer->img[i] = sg_make_image(&img_desc);
             stbi_image_free(data);
         }
