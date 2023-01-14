@@ -69,6 +69,8 @@ void create_geometry(app_t * app) {
         blade_t *blade = it.ref;
         add_quads(app->renderer, blade);
     }
+
+    renderer_generate_grass_lod(app->renderer);
     renderer_add_ground_plane(app->renderer, 30.0f);
 }
 
